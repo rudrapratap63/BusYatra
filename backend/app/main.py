@@ -1,7 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI()
+from app.graphql.schema import get_graphql_router
+from app.graphql.context import get_graphql_context
+
+app = FastAPI(title="BusYatra API", version="0.1.0")
 
 origins = [
     "http://localhost:3000",
@@ -18,11 +21,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# @app.on_event("startup")
-# async def init_tables():
-#     async with engine.begin() as conn:
-#         await conn.run_sync(Base.metadata.create_all)
+# ─── GraphQL ──────────────────────────────────────────────────────────────────
+# Mounts the full GraphQL API at /graphql
+# - GraphiQL playground: http://localhost:8000/graphql  (browser)
+# - API endpoint:        POST http://localhost:8000/graphql  (clients)
+graphql_router = get_graphql_router(context_getter=get_graphql_context)
+app.include_router(graphql_router, prefix="/graphql")
 
+# ─── REST ─────────────────────────────────────────────────────────────────────
 @app.get("/")
 def home():
-    return {"message": "good"}  
+    return {"message": "BusYatra API - visit /graphql for the GraphQL playground"}
