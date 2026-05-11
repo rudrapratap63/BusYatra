@@ -11,10 +11,12 @@ They always have:
 import strawberry
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.db import models
 from app.graphql.types.user import UserType
 from app.graphql.queries.user import _map_user
+from app.core.security import hash_password, verify_password, create_access_token
 
 
 @strawberry.input
@@ -27,6 +29,27 @@ class UpdateProfileInput:
     """
     name: Optional[str] = strawberry.UNSET
     phone_num: Optional[str] = strawberry.UNSET
+
+
+@strawberry.input
+class RegisterInput:
+    email: str
+    password: str
+    phone_num: str
+    name: Optional[str] = None
+    role: Optional[str] = "user"
+
+
+@strawberry.input
+class LoginInput:
+    email: str
+    password: str
+
+
+@strawberry.type
+class AuthPayload:
+    token: str
+    user: UserType
 
 
 @strawberry.type
@@ -61,3 +84,54 @@ class UserMutation:
         await db.commit()
         await db.refresh(current_user)
         return _map_user(current_user)
+
+    @strawberry.mutation(description="Register a new user")
+    async def register(
+        self,
+        info: strawberry.Info,
+        input: RegisterInput,
+    ) -> AuthPayload:
+        db: AsyncSession = info.context["db"]
+        
+        # Check if email is already taken
+        result = await db.execute(select(models.User).where(models.User.email == input.email))
+        if result.scalar_one_or_none():
+            raise Exception("Email already registered")
+
+        hashed_pwd = hash_password(input.password)
+        
+        from app.db.models import RoleEnum
+        role_val = RoleEnum.user
+        if input.role and input.role in RoleEnum.__members__:
+            role_val = RoleEnum[input.role]
+
+        new_user = models.User(
+            email=input.email,
+            password_hash=hashed_pwd,
+            phone_num=input.phone_num,
+            name=input.name,
+            role=role_val
+        )
+        db.add(new_user)
+        await db.commit()
+        await db.refresh(new_user)
+        
+        token = create_access_token(data={"sub": str(new_user.id)})
+        return AuthPayload(token=token, user=_map_user(new_user))
+
+    @strawberry.mutation(description="Login a user")
+    async def login(
+        self,
+        info: strawberry.Info,
+        input: LoginInput,
+    ) -> AuthPayload:
+        db: AsyncSession = info.context["db"]
+        
+        result = await db.execute(select(models.User).where(models.User.email == input.email))
+        user = result.scalar_one_or_none()
+        
+        if not user or not user.password_hash or not verify_password(input.password, user.password_hash):
+            raise Exception("Invalid email or password")
+            
+        token = create_access_token(data={"sub": str(user.id)})
+        return AuthPayload(token=token, user=_map_user(user))

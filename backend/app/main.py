@@ -1,10 +1,23 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.graphql.schema import get_graphql_router
 from app.graphql.context import get_graphql_context
 
-app = FastAPI(title="BusYatra API", version="0.1.0")
+from app.db.database import engine, Base
+from app.db import models
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize the database tables on startup
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    # Dispose the engine on shutdown
+    await engine.dispose()
+
+app = FastAPI(title="BusYatra API", version="0.1.0", lifespan=lifespan)
 
 origins = [
     "http://localhost:3000",
@@ -28,7 +41,6 @@ app.add_middleware(
 graphql_router = get_graphql_router(context_getter=get_graphql_context)
 app.include_router(graphql_router, prefix="/graphql")
 
-# ─── REST ─────────────────────────────────────────────────────────────────────
 @app.get("/")
 def home():
-    return {"message": "BusYatra API - visit /graphql for the GraphQL playground"}
+    return {"message": "BusYatra API - visit /graphql for the GraphQL playground"}

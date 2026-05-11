@@ -14,6 +14,11 @@ from app.api.deps import get_db
 from app.db import models
 
 
+import jwt
+import uuid
+from sqlalchemy import select
+from app.core.config import settings
+
 async def get_current_user_from_request(
     request: Request,
     db: AsyncSession,
@@ -21,16 +26,18 @@ async def get_current_user_from_request(
     """
     Extract and validate auth token from request headers.
     Returns the user object or None if not authenticated.
-    
-    TODO: Implement real JWT validation here.
-    For now returns None (unauthenticated).
     """
-    # Example: Bearer token check
-    # auth_header = request.headers.get("Authorization", "")
-    # if auth_header.startswith("Bearer "):
-    #     token = auth_header[7:]
-    #     user = await verify_jwt_and_get_user(token, db)
-    #     return user
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+            user_id = payload.get("sub")
+            if user_id:
+                result = await db.execute(select(models.User).where(models.User.id == uuid.UUID(user_id)))
+                return result.scalar_one_or_none()
+        except jwt.PyJWTError:
+            return None
     return None
 
 

@@ -1,14 +1,17 @@
+name: busyatra-backend
+
 services:
   postgres:
-    image: postgres
+    container_name: busyatra-postgres
+    image: postgres:15-alpine
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
       POSTGRES_DB: busyatra
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql
+      - busyatra_postgres_data:/var/lib/postgresql/data
 
 volumes:
-  postgres_data:
+  busyatra_postgres_data:
