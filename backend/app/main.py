@@ -5,14 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.graphql.schema import get_graphql_router
 from app.graphql.context import get_graphql_context
 
-from app.db.database import engine, Base
-from app.db import models
+from app.db.database import engine
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize the database tables on startup
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
     yield
     # Dispose the engine on shutdown
     await engine.dispose()
