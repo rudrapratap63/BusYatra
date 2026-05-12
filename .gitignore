@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 .secrets/
+busyatra*
 
 # 🐍 Backend (Python / FastAPI / RQ)
 # Virtual environments
