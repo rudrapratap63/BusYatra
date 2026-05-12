@@ -9,16 +9,15 @@ They always have:
 """
 
 import strawberry
-from typing import Optional
-from graphql import GraphQLError
+from typing import Annotated, Optional, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db import models
 from app.graphql.types.user import UserType
+from app.graphql.types.errors import AuthError, ValidationError
 from app.graphql.queries.user import _map_user
 from app.core.security import hash_password, verify_password, create_access_token
-from app.graphql.permissions import require_authenticated
 
 
 @strawberry.input
@@ -54,6 +53,17 @@ class AuthPayload:
     user: UserType
 
 
+UpdateProfileResult = Annotated[
+    Union[UserType, AuthError],
+    strawberry.union("UpdateProfileResult"),
+]
+
+AuthResult = Annotated[
+    Union[AuthPayload, ValidationError],
+    strawberry.union("AuthResult"),
+]
+
+
 @strawberry.type
 class UserMutation:
     @strawberry.mutation(description="Update the current user's profile.")
@@ -61,7 +71,7 @@ class UserMutation:
         self,
         info: strawberry.Info,
         input: UpdateProfileInput,
-    ) -> Optional[UserType]:
+    ) -> UpdateProfileResult:
         """
         GraphQL mutation:
           mutation {
@@ -73,7 +83,9 @@ class UserMutation:
         Notice: you also specify what fields you want BACK — same as queries!
         """
         db: AsyncSession = info.context["db"]
-        current_user = require_authenticated(info)
+        current_user: models.User | None = info.context.get("current_user")
+        if not current_user:
+            return AuthError(message="Authentication required")
 
         if input.name is not strawberry.UNSET:
             current_user.name = input.name
@@ -90,16 +102,16 @@ class UserMutation:
         self,
         info: strawberry.Info,
         input: RegisterInput,
-    ) -> AuthPayload:
+    ) -> AuthResult:
         db: AsyncSession = info.context["db"]
         
         # Check if email is already taken
         result = await db.execute(select(models.User).where(models.User.email == input.email))
         if result.scalar_one_or_none():
-            raise Exception("Email already registered")
+            return ValidationError(message="Email already registered")
 
         if input.role not in (None, models.RoleEnum.user.value):
-            raise GraphQLError("Role assignment is restricted to admins")
+            return ValidationError(message="Role assignment is restricted to admins")
 
         hashed_pwd = hash_password(input.password)
         
@@ -122,14 +134,14 @@ class UserMutation:
         self,
         info: strawberry.Info,
         input: LoginInput,
-    ) -> AuthPayload:
+    ) -> AuthResult:
         db: AsyncSession = info.context["db"]
         
         result = await db.execute(select(models.User).where(models.User.email == input.email))
         user = result.scalar_one_or_none()
         
         if not user or not user.password_hash or not verify_password(input.password, user.password_hash):
-            raise Exception("Invalid email or password")
+            return ValidationError(message="Invalid email or password")
             
         token = create_access_token(data={"sub": str(user.id)})
         return AuthPayload(token=token, user=_map_user(user))

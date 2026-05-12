@@ -11,15 +11,15 @@ This is the most complex mutation in BusYatra:
 
 import strawberry
 import uuid
-from typing import Optional
+from typing import Annotated, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from app.db import models
 from app.graphql.types.booking import BookingType
+from app.graphql.types.errors import AuthError, ForbiddenError, NotFoundError, ValidationError
 from app.graphql.queries.booking import _map_booking, _BOOKING_LOAD_OPTIONS
-from app.graphql.permissions import has_role, require_authenticated, require_role
+from app.graphql.permissions import has_role
 
 
 @strawberry.input
@@ -54,6 +54,12 @@ class CreateBookingInput:
     passengers: list[PassengerInput]
 
 
+BookingMutationResult = Annotated[
+    Union[BookingType, AuthError, ForbiddenError, NotFoundError, ValidationError],
+    strawberry.union("BookingMutationResult"),
+]
+
+
 @strawberry.type
 class BookingMutation:
     @strawberry.mutation(description="Create a new booking. Requires authentication.")
@@ -61,17 +67,30 @@ class BookingMutation:
         self,
         info: strawberry.Info,
         input: CreateBookingInput,
-    ) -> Optional[BookingType]:
+    ) -> BookingMutationResult:
         db: AsyncSession = info.context["db"]
-        current_user = require_role(info, models.RoleEnum.user)
+        current_user: models.User | None = info.context.get("current_user")
+        if not current_user:
+            return AuthError(message="Authentication required")
+        if not has_role(current_user, models.RoleEnum.user):
+            return ForbiddenError(message="Only traveller users can create bookings")
+        if not input.passengers:
+            return ValidationError(message="At least one passenger is required")
+
+        try:
+            trip_id = uuid.UUID(str(input.trip_id))
+            boarding_point_id = uuid.UUID(str(input.boarding_point_id))
+            drop_point_id = uuid.UUID(str(input.drop_point_id))
+        except ValueError:
+            return ValidationError(message="Invalid trip or boarding point ID")
 
         # 1. Validate trip exists
         trip_result = await db.execute(
-            select(models.Trip).where(models.Trip.id == uuid.UUID(str(input.trip_id)))
+            select(models.Trip).where(models.Trip.id == trip_id)
         )
         trip = trip_result.scalar_one_or_none()
         if not trip:
-            raise Exception("Trip not found")
+            return NotFoundError(message="Trip not found")
 
         # 2. Create the booking
         import secrets, string
@@ -81,8 +100,8 @@ class BookingMutation:
             pnr=pnr,
             user_id=current_user.id,
             trip_id=trip.id,
-            boarding_point_id=uuid.UUID(str(input.boarding_point_id)),
-            drop_point_id=uuid.UUID(str(input.drop_point_id)),
+            boarding_point_id=boarding_point_id,
+            drop_point_id=drop_point_id,
             status=models.BookingStatusEnum.payment_pending,
         )
         db.add(booking)
@@ -90,10 +109,17 @@ class BookingMutation:
 
         # 3. Create passengers & link trip seats
         for p_input in input.passengers:
+            try:
+                seat_id = uuid.UUID(str(p_input.seat_id))
+                gender = models.GenderTypeEnum(p_input.gender)
+            except ValueError:
+                await db.rollback()
+                return ValidationError(message=f"Invalid passenger details for seat {p_input.seat_id}")
+
             # Lock the trip seat
             ts_result = await db.execute(
                 select(models.TripSeat).where(
-                    models.TripSeat.seat_id == uuid.UUID(str(p_input.seat_id)),
+                    models.TripSeat.seat_id == seat_id,
                     models.TripSeat.trip_id == trip.id,
                     models.TripSeat.status == models.SeatStatusEnum.available,
                 )
@@ -101,16 +127,16 @@ class BookingMutation:
             trip_seat = ts_result.scalar_one_or_none()
             if not trip_seat:
                 await db.rollback()
-                raise Exception(f"Seat {p_input.seat_id} is not available")
+                return ValidationError(message=f"Seat {p_input.seat_id} is not available")
 
             trip_seat.status = models.SeatStatusEnum.held
             trip_seat.booking_id = booking.id
-            trip_seat.booked_by_gender = models.GenderTypeEnum(p_input.gender)
+            trip_seat.booked_by_gender = gender
 
             passenger = models.BookingPassenger(
                 name=p_input.name,
                 age=p_input.age,
-                gender=models.GenderTypeEnum(p_input.gender),
+                gender=gender,
                 trip_seat_id=trip_seat.id,
                 booking_id=booking.id,
             )
@@ -133,11 +159,19 @@ class BookingMutation:
         self,
         info: strawberry.Info,
         booking_id: strawberry.ID,
-    ) -> Optional[BookingType]:
+    ) -> BookingMutationResult:
         """REST equivalent: DELETE /bookings/{id} or PATCH /bookings/{id}/cancel"""
         db: AsyncSession = info.context["db"]
-        current_user = require_authenticated(info)
-        filters = [models.Booking.id == uuid.UUID(str(booking_id))]
+        current_user: models.User | None = info.context.get("current_user")
+        if not current_user:
+            return AuthError(message="Authentication required")
+
+        try:
+            parsed_booking_id = uuid.UUID(str(booking_id))
+        except ValueError:
+            return ValidationError(message="Invalid booking ID")
+
+        filters = [models.Booking.id == parsed_booking_id]
         if not has_role(current_user, models.RoleEnum.admin):
             filters.append(models.Booking.user_id == current_user.id)
 
@@ -150,7 +184,7 @@ class BookingMutation:
         booking = result.scalar_one_or_none()
 
         if not booking:
-            raise Exception("Booking not found")
+            return NotFoundError(message="Booking not found")
 
         booking.status = models.BookingStatusEnum.cancelled
 
