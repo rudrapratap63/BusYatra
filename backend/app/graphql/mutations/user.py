@@ -9,6 +9,7 @@ They always have:
 """
 
 import strawberry
+import re
 from typing import Annotated, Optional, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -63,6 +64,50 @@ AuthResult = Annotated[
     strawberry.union("AuthResult"),
 ]
 
+EMAIL_PATTERN = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.IGNORECASE)
+PHONE_PATTERN = re.compile(r"^(?:\+91)?[6-9]\d{9}$")
+PASSWORD_SYMBOL_PATTERN = re.compile(r"[^A-Za-z0-9]")
+
+
+def _normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def _normalize_phone(phone_num: str) -> str:
+    return re.sub(r"[\s()-]", "", phone_num.strip())
+
+
+def _validate_register_input(input: RegisterInput) -> ValidationError | None:
+    email = _normalize_email(input.email)
+    phone_num = _normalize_phone(input.phone_num)
+    password = input.password
+
+    if not EMAIL_PATTERN.fullmatch(email):
+        return ValidationError(message="Enter a valid email address")
+
+    if not PHONE_PATTERN.fullmatch(phone_num):
+        return ValidationError(
+            message="Enter a valid Indian phone number, with optional +91 country code"
+        )
+
+    if len(password) < 8:
+        return ValidationError(message="Password must be at least 8 characters long")
+    if len(password) > 128:
+        return ValidationError(message="Password must be 128 characters or fewer")
+    if not any(char.islower() for char in password):
+        return ValidationError(message="Password must include a lowercase letter")
+    if not any(char.isupper() for char in password):
+        return ValidationError(message="Password must include an uppercase letter")
+    if not any(char.isdigit() for char in password):
+        return ValidationError(message="Password must include a number")
+    if not PASSWORD_SYMBOL_PATTERN.search(password):
+        return ValidationError(message="Password must include a symbol")
+
+    if input.role not in (None, models.RoleEnum.user.value):
+        return ValidationError(message="Role assignment is restricted to admins")
+
+    return None
+
 
 @strawberry.type
 class UserMutation:
@@ -104,21 +149,24 @@ class UserMutation:
         input: RegisterInput,
     ) -> AuthResult:
         db: AsyncSession = info.context["db"]
+        validation_error = _validate_register_input(input)
+        if validation_error:
+            return validation_error
+
+        email = _normalize_email(input.email)
+        phone_num = _normalize_phone(input.phone_num)
         
         # Check if email is already taken
-        result = await db.execute(select(models.User).where(models.User.email == input.email))
+        result = await db.execute(select(models.User).where(models.User.email == email))
         if result.scalar_one_or_none():
             return ValidationError(message="Email already registered")
-
-        if input.role not in (None, models.RoleEnum.user.value):
-            return ValidationError(message="Role assignment is restricted to admins")
 
         hashed_pwd = hash_password(input.password)
         
         new_user = models.User(
-            email=input.email,
+            email=email,
             password_hash=hashed_pwd,
-            phone_num=input.phone_num,
+            phone_num=phone_num,
             name=input.name,
             role=models.RoleEnum.user,
         )
