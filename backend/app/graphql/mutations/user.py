@@ -10,6 +10,7 @@ They always have:
 
 import strawberry
 from typing import Optional
+from graphql import GraphQLError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -17,6 +18,7 @@ from app.db import models
 from app.graphql.types.user import UserType
 from app.graphql.queries.user import _map_user
 from app.core.security import hash_password, verify_password, create_access_token
+from app.graphql.permissions import require_authenticated
 
 
 @strawberry.input
@@ -71,9 +73,7 @@ class UserMutation:
         Notice: you also specify what fields you want BACK — same as queries!
         """
         db: AsyncSession = info.context["db"]
-        current_user: models.User | None = info.context.get("current_user")
-        if not current_user:
-            return None
+        current_user = require_authenticated(info)
 
         if input.name is not strawberry.UNSET:
             current_user.name = input.name
@@ -98,19 +98,17 @@ class UserMutation:
         if result.scalar_one_or_none():
             raise Exception("Email already registered")
 
+        if input.role not in (None, models.RoleEnum.user.value):
+            raise GraphQLError("Role assignment is restricted to admins")
+
         hashed_pwd = hash_password(input.password)
         
-        from app.db.models import RoleEnum
-        role_val = RoleEnum.user
-        if input.role and input.role in RoleEnum.__members__:
-            role_val = RoleEnum[input.role]
-
         new_user = models.User(
             email=input.email,
             password_hash=hashed_pwd,
             phone_num=input.phone_num,
             name=input.name,
-            role=role_val
+            role=models.RoleEnum.user,
         )
         db.add(new_user)
         await db.commit()

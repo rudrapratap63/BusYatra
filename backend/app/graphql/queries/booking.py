@@ -15,6 +15,7 @@ from app.graphql.types.booking import BookingType, BookingPassengerType, Payment
 from app.graphql.types.bus import TripSeatType
 from app.graphql.queries.trip import _map_trip, _map_trip_seat
 from app.graphql.queries.trip import _map_stop
+from app.graphql.permissions import has_role, require_authenticated
 
 
 def _map_boarding_point(bp: models.BoardingPoint):
@@ -92,9 +93,7 @@ class BookingQuery:
           }
         """
         db: AsyncSession = info.context["db"]
-        current_user: models.User | None = info.context.get("current_user")
-        if not current_user:
-            return []
+        current_user = require_authenticated(info)
 
         stmt = (
             select(models.Booking)
@@ -108,9 +107,14 @@ class BookingQuery:
     async def booking(self, info: strawberry.Info, id: strawberry.ID) -> Optional[BookingType]:
         """REST equivalent: GET /bookings/{id}"""
         db: AsyncSession = info.context["db"]
+        current_user = require_authenticated(info)
+        filters = [models.Booking.id == uuid_mod.UUID(str(id))]
+        if not has_role(current_user, models.RoleEnum.admin):
+            filters.append(models.Booking.user_id == current_user.id)
+
         stmt = (
             select(models.Booking)
-            .where(models.Booking.id == uuid_mod.UUID(str(id)))
+            .where(*filters)
             .options(*_BOOKING_LOAD_OPTIONS)
         )
         result = await db.execute(stmt)

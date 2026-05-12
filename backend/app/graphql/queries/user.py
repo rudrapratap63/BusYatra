@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from app.db import models
 from app.graphql.types.user import UserType, OrgType
+from app.graphql.permissions import require_role
 
 
 def _map_user(db_user: models.User) -> UserType:
@@ -58,6 +59,7 @@ class UserQuery:
     @strawberry.field(description="Get a user by ID. Admin only.")
     async def user(self, info: strawberry.Info, id: strawberry.ID) -> Optional[UserType]:
         """REST equivalent: GET /users/{id}"""
+        require_role(info, models.RoleEnum.admin)
         db: AsyncSession = info.context["db"]
         import uuid as uuid_mod
         result = await db.execute(
@@ -69,6 +71,7 @@ class UserQuery:
     @strawberry.field(description="List all users. Admin only.")
     async def users(self, info: strawberry.Info) -> list[UserType]:
         """REST equivalent: GET /users"""
+        require_role(info, models.RoleEnum.admin)
         db: AsyncSession = info.context["db"]
         result = await db.execute(select(models.User))
         return [_map_user(u) for u in result.scalars().all()]

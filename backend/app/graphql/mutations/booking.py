@@ -19,6 +19,7 @@ from sqlalchemy.orm import selectinload
 from app.db import models
 from app.graphql.types.booking import BookingType
 from app.graphql.queries.booking import _map_booking, _BOOKING_LOAD_OPTIONS
+from app.graphql.permissions import has_role, require_authenticated, require_role
 
 
 @strawberry.input
@@ -62,9 +63,7 @@ class BookingMutation:
         input: CreateBookingInput,
     ) -> Optional[BookingType]:
         db: AsyncSession = info.context["db"]
-        current_user: models.User | None = info.context.get("current_user")
-        if not current_user:
-            raise Exception("Authentication required")
+        current_user = require_role(info, models.RoleEnum.user)
 
         # 1. Validate trip exists
         trip_result = await db.execute(
@@ -137,16 +136,14 @@ class BookingMutation:
     ) -> Optional[BookingType]:
         """REST equivalent: DELETE /bookings/{id} or PATCH /bookings/{id}/cancel"""
         db: AsyncSession = info.context["db"]
-        current_user: models.User | None = info.context.get("current_user")
-        if not current_user:
-            raise Exception("Authentication required")
+        current_user = require_authenticated(info)
+        filters = [models.Booking.id == uuid.UUID(str(booking_id))]
+        if not has_role(current_user, models.RoleEnum.admin):
+            filters.append(models.Booking.user_id == current_user.id)
 
         stmt = (
             select(models.Booking)
-            .where(
-                models.Booking.id == uuid.UUID(str(booking_id)),
-                models.Booking.user_id == current_user.id,
-            )
+            .where(*filters)
             .options(*_BOOKING_LOAD_OPTIONS)
         )
         result = await db.execute(stmt)
