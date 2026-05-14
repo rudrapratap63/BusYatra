@@ -16,6 +16,8 @@ from app.graphql.mutations.user import UserMutation
 from app.graphql.mutations.booking import BookingMutation
 from app.graphql.mutations.org import OrgMutation
 from app.graphql.mutations.bus import BusMutation
+from app.graphql.mutations.stop import StopMutation
+from app.graphql.mutations.route import RouteMutation
 
 
 @strawberry.type
@@ -35,7 +37,14 @@ class Query(UserQuery, TripQuery, BookingQuery):
 
 
 @strawberry.type
-class Mutation(UserMutation, BookingMutation, OrgMutation, BusMutation):
+class Mutation(
+    UserMutation,
+    BookingMutation,
+    OrgMutation,
+    BusMutation,
+    StopMutation,
+    RouteMutation,
+):
     """
     Root Mutation type — all write operations.
     
@@ -44,6 +53,9 @@ class Mutation(UserMutation, BookingMutation, OrgMutation, BusMutation):
       - createBooking, cancelBooking  (from BookingMutation)
       - registerOrg               (from OrgMutation)
       - addBus, updateBus, removeBus  (from BusMutation)
+      - addStop, updateStop       (from StopMutation)
+      - createRoute, addRouteStops, setRouteStatus, addBoardingPoint
+                                   (from RouteMutation)
     """
     pass
 
