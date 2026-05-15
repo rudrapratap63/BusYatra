@@ -45,3 +45,14 @@ class RouteType:
     source_stop: Optional[StopType]
     dest_stop: Optional[StopType]
     route_stops: list[RouteStopType]
+
+
+@strawberry.type
+class RouteSegmentPriceType:
+    """Seat pricing for a route segment between two stops."""
+    id: strawberry.ID
+    price: Optional[float]
+    seat_type: Optional[str]
+    berth_type: str
+    from_stop: Optional[StopType]
+    to_stop: Optional[StopType]

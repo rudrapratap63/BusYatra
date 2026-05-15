@@ -13,7 +13,7 @@ from app.graphql.permissions import has_role
 from app.graphql.queries.booking import _map_boarding_point
 from app.graphql.queries.trip import _map_route_stop, _map_stop
 from app.graphql.types.errors import AuthError, ForbiddenError, NotFoundError, ValidationError
-from app.graphql.types.route import BoardingPointType, RouteType
+from app.graphql.types.route import BoardingPointType, RouteSegmentPriceType, RouteType
 
 
 @strawberry.input
@@ -51,6 +51,16 @@ class AddBoardingPointInput:
     type: str = "both"
 
 
+@strawberry.input
+class SetSegmentPriceInput:
+    route_id: strawberry.ID
+    from_stop_id: strawberry.ID
+    to_stop_id: strawberry.ID
+    seat_type: str
+    price: float
+    berth_type: str = "none"
+
+
 RouteMutationResult = Annotated[
     Union[RouteType, AuthError, ForbiddenError, NotFoundError, ValidationError],
     strawberry.union("RouteMutationResult"),
@@ -60,6 +70,12 @@ RouteMutationResult = Annotated[
 BoardingPointMutationResult = Annotated[
     Union[BoardingPointType, AuthError, ForbiddenError, NotFoundError, ValidationError],
     strawberry.union("BoardingPointMutationResult"),
+]
+
+
+SegmentPriceMutationResult = Annotated[
+    Union[RouteSegmentPriceType, AuthError, ForbiddenError, NotFoundError, ValidationError],
+    strawberry.union("SegmentPriceMutationResult"),
 ]
 
 
@@ -239,6 +255,69 @@ class RouteMutation:
         )
         return _map_boarding_point(result.scalar_one())
 
+    @strawberry.mutation(description="Create or update pricing for a route segment.")
+    async def set_segment_price(
+        self,
+        info: strawberry.Info,
+        input: SetSegmentPriceInput,
+    ) -> SegmentPriceMutationResult:
+        db: AsyncSession = info.context["db"]
+        route_result = await _get_owned_route(db, info, input.route_id)
+        if isinstance(route_result, (AuthError, ForbiddenError, NotFoundError, ValidationError)):
+            return route_result
+        route = route_result
+
+        try:
+            from_stop_id = uuid.UUID(str(input.from_stop_id))
+            to_stop_id = uuid.UUID(str(input.to_stop_id))
+        except ValueError:
+            return ValidationError(message="Invalid segment stop ID")
+        if from_stop_id == to_stop_id:
+            return ValidationError(message="Segment stops must be different")
+        if input.price < 0:
+            return ValidationError(message="Segment price cannot be negative")
+
+        try:
+            seat_type = models.SeatTypeEnum(input.seat_type)
+            berth_type = models.BerthTypeEnum(input.berth_type)
+        except ValueError:
+            return ValidationError(message="Invalid seat type or berth type")
+
+        stop_order_result = await _get_route_stop_order(db, route)
+        if isinstance(stop_order_result, ValidationError):
+            return stop_order_result
+        stop_order = stop_order_result
+        if from_stop_id not in stop_order or to_stop_id not in stop_order:
+            return ValidationError(message="Segment stops must be on the route")
+        if stop_order[from_stop_id] >= stop_order[to_stop_id]:
+            return ValidationError(message="Segment destination must come after source")
+
+        existing_result = await db.execute(
+            select(models.RouteSegmentPrice).where(
+                models.RouteSegmentPrice.route_id == route.id,
+                models.RouteSegmentPrice.from_stop_id == from_stop_id,
+                models.RouteSegmentPrice.to_stop_id == to_stop_id,
+                models.RouteSegmentPrice.seat_type == seat_type,
+                models.RouteSegmentPrice.berth_type == berth_type,
+            )
+        )
+        segment_price = existing_result.scalar_one_or_none()
+        if segment_price:
+            segment_price.price = input.price
+        else:
+            segment_price = models.RouteSegmentPrice(
+                route_id=route.id,
+                from_stop_id=from_stop_id,
+                to_stop_id=to_stop_id,
+                seat_type=seat_type,
+                berth_type=berth_type,
+                price=input.price,
+            )
+
+        db.add(segment_price)
+        await db.commit()
+        return await _load_and_map_segment_price(db, segment_price.id)
+
 
 async def _get_owned_org_for_route_mutation(
     db: AsyncSession,
@@ -371,6 +450,30 @@ async def _route_has_stop(
     return result.scalar_one_or_none() is not None
 
 
+async def _get_route_stop_order(
+    db: AsyncSession,
+    route: models.Route,
+) -> dict[uuid.UUID, int] | ValidationError:
+    stop_order: dict[uuid.UUID, int] = {}
+    if route.source_stop_id:
+        stop_order[route.source_stop_id] = 0
+
+    result = await db.execute(
+        select(models.RouteStop).where(models.RouteStop.route_id == route.id)
+    )
+    for route_stop in result.scalars().all():
+        if route_stop.stop_id is not None and route_stop.sequence_order is not None:
+            stop_order[route_stop.stop_id] = route_stop.sequence_order
+
+    if route.dest_stop_id:
+        destination_order = max(stop_order.values(), default=0) + 1
+        stop_order.setdefault(route.dest_stop_id, destination_order)
+
+    if len(stop_order) < 2:
+        return ValidationError(message="Route must have at least source and destination stops")
+    return stop_order
+
+
 async def _load_and_map_route(db: AsyncSession, route_id: uuid.UUID) -> RouteType:
     result = await db.execute(
         select(models.Route)
@@ -392,4 +495,27 @@ async def _load_and_map_route(db: AsyncSession, route_id: uuid.UUID) -> RouteTyp
         source_stop=_map_stop(route.source_stop) if route.source_stop else None,
         dest_stop=_map_stop(route.dest_stop) if route.dest_stop else None,
         route_stops=[_map_route_stop(route_stop) for route_stop in sorted_route_stops],
+    )
+
+
+async def _load_and_map_segment_price(
+    db: AsyncSession,
+    segment_price_id: uuid.UUID,
+) -> RouteSegmentPriceType:
+    result = await db.execute(
+        select(models.RouteSegmentPrice)
+        .where(models.RouteSegmentPrice.id == segment_price_id)
+        .options(
+            selectinload(models.RouteSegmentPrice.from_stop),
+            selectinload(models.RouteSegmentPrice.to_stop),
+        )
+    )
+    segment_price = result.scalar_one()
+    return RouteSegmentPriceType(
+        id=str(segment_price.id),
+        price=float(segment_price.price) if segment_price.price is not None else None,
+        seat_type=segment_price.seat_type.value if segment_price.seat_type else None,
+        berth_type=segment_price.berth_type.value,
+        from_stop=_map_stop(segment_price.from_stop) if segment_price.from_stop else None,
+        to_stop=_map_stop(segment_price.to_stop) if segment_price.to_stop else None,
     )

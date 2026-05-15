@@ -455,7 +455,7 @@ class TripSeat(Base):
         UUID(as_uuid=True), ForeignKey("trips.id"), nullable=True
     )
     seat_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("seats.id"), nullable=True, unique=True
+        UUID(as_uuid=True), ForeignKey("seats.id"), nullable=True
     )
     status: Mapped[SeatStatusEnum | None] = mapped_column(Enum(SeatStatusEnum), nullable=True)
     booked_by_gender: Mapped[GenderTypeEnum | None] = mapped_column(
@@ -465,6 +465,10 @@ class TripSeat(Base):
     held_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     booking_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("bookings.id"), nullable=True, unique=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("trip_id", "seat_id", name="uq_trip_seat_trip_seat"),
     )
 
     # Relationships
