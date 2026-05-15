@@ -12,6 +12,7 @@ from strawberry.fastapi import GraphQLRouter
 from app.graphql.queries.user import UserQuery
 from app.graphql.queries.trip import TripQuery
 from app.graphql.queries.booking import BookingQuery
+from app.graphql.queries.org import OrgQuery
 from app.graphql.mutations.user import UserMutation
 from app.graphql.mutations.booking import BookingMutation
 from app.graphql.mutations.org import OrgMutation
@@ -22,7 +23,7 @@ from app.graphql.mutations.trip import TripMutation
 
 
 @strawberry.type
-class Query(UserQuery, TripQuery, BookingQuery):
+class Query(UserQuery, TripQuery, BookingQuery, OrgQuery):
     """
     Root Query type — all read operations.
     
@@ -33,6 +34,7 @@ class Query(UserQuery, TripQuery, BookingQuery):
       - me, user, users           (from UserQuery)
       - searchTrips, trip, tripSeats  (from TripQuery)
       - myBookings, booking       (from BookingQuery)
+      - myOrg, orgBuses, orgRoutes, orgTrips  (from OrgQuery)
     """
     pass
 
