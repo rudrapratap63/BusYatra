@@ -6,7 +6,7 @@ REST equivalent: FastAPI's Depends() on each route.
 In GraphQL: one central context_getter for the whole schema.
 """
 
-from fastapi import Request, Depends
+from fastapi import Request, Response, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import AsyncGenerator
 
@@ -24,25 +24,30 @@ async def get_current_user_from_request(
     db: AsyncSession,
 ) -> models.User | None:
     """
-    Extract and validate auth token from request headers.
+    Extract and validate auth token from the auth cookie.
     Returns the user object or None if not authenticated.
     """
+    token = request.cookies.get(settings.AUTH_COOKIE_NAME)
     auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
+    if not token and auth_header.startswith("Bearer "):
         token = auth_header[7:]
-        try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-            user_id = payload.get("sub")
-            if user_id:
-                result = await db.execute(select(models.User).where(models.User.id == uuid.UUID(user_id)))
-                return result.scalar_one_or_none()
-        except jwt.PyJWTError:
-            return None
+    if not token:
+        return None
+
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id:
+            result = await db.execute(select(models.User).where(models.User.id == uuid.UUID(user_id)))
+            return result.scalar_one_or_none()
+    except (ValueError, jwt.PyJWTError):
+        return None
     return None
 
 
 async def get_graphql_context(
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
@@ -57,6 +62,7 @@ async def get_graphql_context(
     current_user = await get_current_user_from_request(request, db)
     return {
         "request": request,
+        "response": response,
         "db": db,
         "current_user": current_user,
     }

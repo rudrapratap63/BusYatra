@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -10,6 +11,7 @@ import { ArrowRight, Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { graphqlRequest } from "@/lib/graphql";
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
@@ -19,12 +21,14 @@ const loginSchema = z.object({
 type LoginFormValues = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -32,11 +36,45 @@ export default function LoginPage() {
 
   const onSubmit = async (data: LoginFormValues) => {
     setIsLoading(true);
-    // TODO: Wire to Apollo mutation
-    setTimeout(() => {
-      console.log("Login submitted:", data);
+    try {
+      const result = await graphqlRequest<{
+        login: { __typename: "AuthPayload" | "ValidationError"; message?: string };
+      }>(
+        `mutation Login($input: LoginInput!) {
+          login(input: $input) {
+            __typename
+            ... on AuthPayload {
+              user {
+                id
+                name
+                email
+                role
+              }
+            }
+            ... on ValidationError {
+              message
+            }
+          }
+        }`,
+        { input: data },
+      );
+
+      if (result.login.__typename === "ValidationError") {
+        setError("root", {
+          message: result.login.message ?? "Invalid email or password",
+        });
+        return;
+      }
+
+      router.push("/");
+      router.refresh();
+    } catch (error) {
+      setError("root", {
+        message: error instanceof Error ? error.message : "Unable to sign in",
+      });
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   return (

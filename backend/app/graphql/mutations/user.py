@@ -11,6 +11,7 @@ They always have:
 import strawberry
 import re
 from typing import Annotated, Optional, Union
+from fastapi import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -19,6 +20,7 @@ from app.graphql.types.user import UserType
 from app.graphql.types.errors import AuthError, ValidationError
 from app.graphql.queries.user import _map_user
 from app.core.security import hash_password, verify_password, create_access_token
+from app.core.config import settings
 
 
 @strawberry.input
@@ -50,7 +52,7 @@ class LoginInput:
 
 @strawberry.type
 class AuthPayload:
-    token: str
+    token: Optional[str] = None
     user: UserType
 
 
@@ -107,6 +109,32 @@ def _validate_register_input(input: RegisterInput) -> ValidationError | None:
         return ValidationError(message="Role assignment is restricted to admins")
 
     return None
+
+
+def _set_auth_cookie(info: strawberry.Info, token: str) -> None:
+    response: Response = info.context["response"]
+    response.set_cookie(
+        key=settings.AUTH_COOKIE_NAME,
+        value=token,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        secure=settings.AUTH_COOKIE_SECURE,
+        samesite=settings.AUTH_COOKIE_SAMESITE,
+        domain=settings.AUTH_COOKIE_DOMAIN,
+        path="/",
+    )
+
+
+def _clear_auth_cookie(info: strawberry.Info) -> None:
+    response: Response = info.context["response"]
+    response.delete_cookie(
+        key=settings.AUTH_COOKIE_NAME,
+        domain=settings.AUTH_COOKIE_DOMAIN,
+        path="/",
+        samesite=settings.AUTH_COOKIE_SAMESITE,
+        secure=settings.AUTH_COOKIE_SECURE,
+        httponly=True,
+    )
 
 
 @strawberry.type
@@ -175,7 +203,8 @@ class UserMutation:
         await db.refresh(new_user)
         
         token = create_access_token(data={"sub": str(new_user.id)})
-        return AuthPayload(token=token, user=_map_user(new_user))
+        _set_auth_cookie(info, token)
+        return AuthPayload(user=_map_user(new_user))
 
     @strawberry.mutation(description="Login a user")
     async def login(
@@ -192,4 +221,10 @@ class UserMutation:
             return ValidationError(message="Invalid email or password")
             
         token = create_access_token(data={"sub": str(user.id)})
-        return AuthPayload(token=token, user=_map_user(user))
+        _set_auth_cookie(info, token)
+        return AuthPayload(user=_map_user(user))
+
+    @strawberry.mutation(description="Logout the current user")
+    async def logout(self, info: strawberry.Info) -> bool:
+        _clear_auth_cookie(info)
+        return True

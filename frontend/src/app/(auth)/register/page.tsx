@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
+import { useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import {
@@ -20,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { graphqlRequest } from "@/lib/graphql";
 
 const registerSchema = z
   .object({
@@ -27,9 +30,7 @@ const registerSchema = z
     email: z.string().email("Please enter a valid email address"),
     phone: z
       .string()
-      .regex(/^\d{10}$/, "Phone number must be 10 digits")
-      .optional()
-      .or(z.literal("")),
+      .regex(/^\d{10}$/, "Phone number must be 10 digits"),
     password: z.string().min(8, "Password must be at least 8 characters"),
     confirmPassword: z.string(),
   })
@@ -79,27 +80,71 @@ function PasswordStrength({ password }: { password: string }) {
 }
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const {
     register,
     handleSubmit,
-    watch,
+    control,
+    setError,
     formState: { errors },
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
   });
 
-  const passwordValue = watch("password", "");
+  const passwordValue = useWatch({ control, name: "password" }) ?? "";
 
   const onSubmit = async (data: RegisterFormValues) => {
     setIsLoading(true);
-    // TODO: Wire to Apollo mutation
-    setTimeout(() => {
-      console.log("Registration submitted:", data);
+    try {
+      const result = await graphqlRequest<{
+        register: { __typename: "AuthPayload" | "ValidationError"; message?: string };
+      }>(
+        `mutation Register($input: RegisterInput!) {
+          register(input: $input) {
+            __typename
+            ... on AuthPayload {
+              user {
+                id
+                name
+                email
+                role
+              }
+            }
+            ... on ValidationError {
+              message
+            }
+          }
+        }`,
+        {
+          input: {
+            name: data.name,
+            email: data.email,
+            phoneNum: data.phone,
+            password: data.password,
+          },
+        },
+      );
+
+      if (result.register.__typename === "ValidationError") {
+        setError("root", {
+          message: result.register.message ?? "Unable to create account",
+        });
+        return;
+      }
+
+      router.push("/");
+      router.refresh();
+    } catch (error) {
+      setError("root", {
+        message:
+          error instanceof Error ? error.message : "Unable to create account",
+      });
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   return (
@@ -171,8 +216,7 @@ export default function RegisterPage() {
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="reg-phone" className="text-sm font-semibold text-foreground">
-              Phone{" "}
-              <span className="text-neutral-400 font-normal">(optional)</span>
+              Phone
             </Label>
             <div className="relative group">
               <Phone className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-neutral-400 group-focus-within:text-primary-500 transition-colors" />
