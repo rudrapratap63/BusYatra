@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-18T11:05:00Z",
+  "title": "Design System: BusYatra",
+  "extensions": {
+    "colorMeta": {
+      "trust-teal": { "role": "primary", "displayName": "Trust Teal" },
+      "ticket-gold": { "role": "secondary", "displayName": "Ticket Gold" }
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Used for the primary call to action.",
+      "html": "<button class=\"ds-btn-primary\">Search Buses</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; background: #0d9488; color: #ffffff; padding: 0.5rem 1rem; font-family: 'Inter', sans-serif; font-size: 0.875rem; font-weight: 500; border: none; border-radius: calc(0.75rem - 2px); transition: all 0.2s; cursor: pointer; } .ds-btn-primary:hover { background: #0a7c71; } .ds-btn-primary:active { transform: scale(0.98); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Trusted Transit Terminal",
+    "overview": "This system is built for speed and reliability. It eschews generic SaaS decorations (like heavy glassmorphism and cluttered metric cards) in favor of clear, functional utility.",
+    "keyCharacteristics": [
+      "Utilitarian and direct",
+      "High-contrast visual hierarchy",
+      "Minimal and flush interactive elements"
+    ],
+    "rules": [
+      {
+        "name": "The Functional Color Rule",
+        "body": "Color is reserved for state and semantics. Do not use background gradients or decorative color washes.",
+        "section": "colors"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "Surfaces are flat at rest. Shadows appear only as a response to state (like hover, active, or dropdown menus). Avoid diffuse ambient shadows.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do rely on structural borders for layout division.",
+      "Do use the established semantic seat colors exclusively for seat mapping.",
+      "Do ensure interactive elements feel minimal and flush."
+    ],
+    "donts": [
+      "Don't use overly complex, generic SaaS-heavy templates.",
+      "Don't use decorative glassmorphism.",
+      "Don't use cluttered metrics that distract from the core booking flow."
+    ]
+  }
+}
