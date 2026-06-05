@@ -22,7 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { graphqlRequest } from "@/lib/graphql";
+import { useAuth } from "@/hooks/use-auth";
 
 const registerSchema = z
   .object({
@@ -81,6 +81,7 @@ function PasswordStrength({ password }: { password: string }) {
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { register: registerUser } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -99,42 +100,12 @@ export default function RegisterPage() {
   const onSubmit = async (data: RegisterFormValues) => {
     setIsLoading(true);
     try {
-      const result = await graphqlRequest<{
-        register: { __typename: "AuthPayload" | "ValidationError"; message?: string };
-      }>(
-        `mutation Register($input: RegisterInput!) {
-          register(input: $input) {
-            __typename
-            ... on AuthPayload {
-              user {
-                id
-                name
-                email
-                role
-              }
-            }
-            ... on ValidationError {
-              message
-            }
-          }
-        }`,
-        {
-          input: {
-            name: data.name,
-            email: data.email,
-            phoneNum: data.phone,
-            password: data.password,
-          },
-        },
-      );
-
-      if (result.register.__typename === "ValidationError") {
-        setError("root", {
-          message: result.register.message ?? "Unable to create account",
-        });
-        return;
-      }
-
+      await registerUser({
+        name: data.name,
+        email: data.email,
+        phoneNum: data.phone,
+        password: data.password,
+      });
       router.push("/");
       router.refresh();
     } catch (error) {

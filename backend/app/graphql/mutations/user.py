@@ -202,9 +202,11 @@ class UserMutation:
         await db.commit()
         await db.refresh(new_user)
         
-        token = create_access_token(data={"sub": str(new_user.id)})
+        token = create_access_token(
+            data={"sub": str(new_user.id), "role": new_user.role.value}
+        )
         _set_auth_cookie(info, token)
-        return AuthPayload(user=_map_user(new_user))
+        return AuthPayload(token=token, user=_map_user(new_user))
 
     @strawberry.mutation(description="Login a user")
     async def login(
@@ -220,9 +222,11 @@ class UserMutation:
         if not user or not user.password_hash or not verify_password(input.password, user.password_hash):
             return ValidationError(message="Invalid email or password")
             
-        token = create_access_token(data={"sub": str(user.id)})
+        token = create_access_token(
+            data={"sub": str(user.id), "role": user.role.value if user.role else None}
+        )
         _set_auth_cookie(info, token)
-        return AuthPayload(user=_map_user(user))
+        return AuthPayload(token=token, user=_map_user(user))
 
     @strawberry.mutation(description="Logout the current user")
     async def logout(self, info: strawberry.Info) -> bool:

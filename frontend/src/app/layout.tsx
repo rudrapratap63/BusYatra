@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
 import { Inter, Outfit, JetBrains_Mono } from "next/font/google";
+
+import { AuthProvider } from "@/hooks/use-auth";
+import { ApolloWrapper } from "@/lib/apollo-wrapper";
+
 import "./globals.css";
 
 const inter = Inter({
@@ -38,7 +42,9 @@ export default function RootLayout({
       className={`${inter.variable} ${outfit.variable} ${jetbrainsMono.variable} h-full`}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground antialiased">
-        {children}
+        <AuthProvider>
+          <ApolloWrapper>{children}</ApolloWrapper>
+        </AuthProvider>
       </body>
     </html>
   );

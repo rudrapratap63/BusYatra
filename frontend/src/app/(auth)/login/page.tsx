@@ -11,7 +11,7 @@ import { ArrowRight, Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { graphqlRequest } from "@/lib/graphql";
+import { useAuth } from "@/hooks/use-auth";
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
@@ -22,6 +22,7 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
+  const { login } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -37,35 +38,7 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginFormValues) => {
     setIsLoading(true);
     try {
-      const result = await graphqlRequest<{
-        login: { __typename: "AuthPayload" | "ValidationError"; message?: string };
-      }>(
-        `mutation Login($input: LoginInput!) {
-          login(input: $input) {
-            __typename
-            ... on AuthPayload {
-              user {
-                id
-                name
-                email
-                role
-              }
-            }
-            ... on ValidationError {
-              message
-            }
-          }
-        }`,
-        { input: data },
-      );
-
-      if (result.login.__typename === "ValidationError") {
-        setError("root", {
-          message: result.login.message ?? "Invalid email or password",
-        });
-        return;
-      }
-
+      await login(data);
       router.push("/");
       router.refresh();
     } catch (error) {
